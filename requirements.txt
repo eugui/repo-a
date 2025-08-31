@@ -1,2 +1,0 @@
-git+https://github.com/eugui/repo-b
-requests
